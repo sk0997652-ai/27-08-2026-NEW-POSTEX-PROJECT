@@ -1,0 +1,6 @@
+{
+  "name": "PostEx HR Portal",
+  "description": "Production-grade enterprise HR onboarding and governance portal featuring 3-layer authorization (Role defaults, User overrides with mandatory justifications, and Zonal RLS), Phase 6 Super Admin portal with global metrics, attention summary, Organization CRUD (Zones, Branches, Departments, Designations), 5-Category Custom Access matrix, and non-overrideable Audit Trails; plus Zonal HR Governance portal with regional workload tracking, delayed queue step-in directives, branch manager assignments, and compliance reporting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
