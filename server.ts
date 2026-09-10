@@ -21,6 +21,14 @@ import {
   CandidateDocument,
   DocumentType
 } from './src/types';
+import {
+  SmsService,
+  EmailService,
+  StorageService,
+  WhatsAppService,
+  getIntegrationsOverview
+} from './src/server/integrations';
+
 
 async function startServer() {
   const app = express();
@@ -1234,6 +1242,33 @@ async function startServer() {
     ];
 
     notifications.forEach(n => dbStore.notifications.push(n));
+
+    // Phase 7: Real/Pluggable Gateway Dispatches (Gracefully logs or sends)
+    SmsService.sendSms({
+      to: newCandidate.mobile,
+      message: notifications[0].content,
+      templateType: 'ONBOARDING_INVITE',
+      metadata: { joiningId, cnic: newCandidate.cnic }
+    }).catch(err => console.warn('[Candidate Creation] SMS Gateway notification note:', err));
+
+    EmailService.sendEmail({
+      to: newCandidate.email,
+      subject: notifications[1].title,
+      text: notifications[1].content,
+      templateType: 'ONBOARDING_INVITE',
+      metadata: { joiningId, track: selectedTrack, branchName: branch.name }
+    }).catch(err => console.warn('[Candidate Creation] Email Gateway notification note:', err));
+
+    WhatsAppService.sendMessage({
+      to: newCandidate.mobile,
+      templateName: 'postex_onboarding_welcome',
+      languageCode: 'en',
+      bodyText: notifications[0].content,
+      parameters: [
+        { type: 'text', text: newCandidate.firstName },
+        { type: 'text', text: joiningId }
+      ]
+    }).catch(err => console.warn('[Candidate Creation] WhatsApp mirror notification note:', err));
 
     // Immutable Audit Trail Logging
     AuditLogger.log({
@@ -3525,6 +3560,171 @@ async function startServer() {
       executedAt: new Date().toISOString()
     });
   });
+
+  // ====================================================
+  // 7B. PHASE 7 — PRODUCTION INTEGRATIONS & STORAGE ENDPOINTS
+  // ====================================================
+
+  /**
+   * GET /api/integrations/overview
+   * Returns current status of all 4 integration pillars (SMS, Email, Storage, WhatsApp),
+   * credentials presence, active provider, and architectural recommendations.
+   */
+  app.get('/api/integrations/overview', (req: AuthenticatedRequest, res: Response) => {
+    const overview = getIntegrationsOverview();
+    res.json(overview);
+  });
+
+  /**
+   * POST /api/integrations/switch
+   * Hot-swaps the active provider for SMS, Email, Storage, or WhatsApp.
+   * Prevents switching to paid unconfigured providers.
+   */
+  app.post('/api/integrations/switch', (req: AuthenticatedRequest, res: Response) => {
+    const activeUser = getActiveUser(req);
+    // Allow SUPER_ADMIN or CENTRAL_HR to configure gateways
+    if (activeUser.role !== 'SUPER_ADMIN' && activeUser.role !== 'CENTRAL_HR') {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Only Super Admin and Central HR may modify gateway providers.'
+      });
+    }
+
+    const { category, providerId } = req.body;
+    if (!category || !providerId) {
+      return res.status(400).json({ success: false, error: 'Both category and providerId are required.' });
+    }
+
+    let switchResult: { success: boolean; message: string };
+
+    switch (category) {
+      case 'sms':
+        switchResult = SmsService.setActiveProvider(providerId);
+        break;
+      case 'email':
+        switchResult = EmailService.setActiveProvider(providerId);
+        break;
+      case 'storage':
+        switchResult = StorageService.setActiveProvider(providerId);
+        break;
+      case 'whatsapp':
+        switchResult = WhatsAppService.setActiveProvider(providerId);
+        break;
+      default:
+        return res.status(400).json({ success: false, error: `Unknown category "${category}". Must be sms, email, storage, or whatsapp.` });
+    }
+
+    if (!switchResult.success) {
+      return res.status(400).json({ success: false, error: switchResult.message });
+    }
+
+    AuditLogger.log({
+      actorId: activeUser.id,
+      actorEmail: activeUser.email,
+      actorRole: activeUser.role,
+      action: 'INTEGRATION_PROVIDER_SWITCHED',
+      entityType: 'INTEGRATION_GATEWAY',
+      entityId: `${category}:${providerId}`,
+      reason: `Switched ${category.toUpperCase()} gateway to ${providerId}`
+    });
+
+    res.json({
+      success: true,
+      message: switchResult.message,
+      overview: getIntegrationsOverview()
+    });
+  });
+
+  /**
+   * POST /api/integrations/test
+   * Dispatches a live test message or performs a storage health-check.
+   */
+  app.post('/api/integrations/test', async (req: AuthenticatedRequest, res: Response) => {
+    const activeUser = getActiveUser(req);
+    if (activeUser.role !== 'SUPER_ADMIN' && activeUser.role !== 'CENTRAL_HR') {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden: Only Super Admin and Central HR may execute gateway diagnostic tests.'
+      });
+    }
+
+    const { category, providerId, testRecipient } = req.body;
+
+    try {
+      if (category === 'sms') {
+        const testRes = await SmsService.testProvider(providerId, testRecipient);
+        return res.json(testRes);
+      } else if (category === 'email') {
+        const testRes = await EmailService.testProvider(providerId, testRecipient);
+        return res.json(testRes);
+      } else if (category === 'storage') {
+        const testRes = await StorageService.testStorage();
+        return res.json(testRes);
+      } else if (category === 'whatsapp') {
+        const testRes = await WhatsAppService.testWhatsApp(testRecipient);
+        return res.json(testRes);
+      } else {
+        return res.status(400).json({ success: false, error: `Invalid category "${category}".` });
+      }
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: err.message || 'Diagnostic test failed'
+      });
+    }
+  });
+
+  /**
+   * POST /api/storage/signed-url
+   * Generates a secure, short-lived authenticated signed URL (15-minute TTL)
+   * for viewing or downloading candidate documents, signatures, or dossier PDFs.
+   */
+  app.post('/api/storage/signed-url', async (req: AuthenticatedRequest, res: Response) => {
+    const { path: docPath, expiresInSeconds = 900 } = req.body;
+
+    if (!docPath) {
+      return res.status(400).json({ success: false, error: 'Document path is required.' });
+    }
+
+    try {
+      const signedUrlRes = await StorageService.getSignedUrl(docPath, expiresInSeconds);
+      if (!signedUrlRes.success) {
+        return res.status(500).json({ success: false, error: signedUrlRes.errorMessage });
+      }
+
+      res.json(signedUrlRes);
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to generate signed URL' });
+    }
+  });
+
+  /**
+   * GET /api/storage/signed-download
+   * Handles local cryptographic HMAC signed URL downloads for zero-exposure development.
+   */
+  app.get('/api/storage/signed-download', (req: Request, res: Response) => {
+    const bucket = (req.query.bucket as string) || 'hr-private-documents';
+    const filePath = req.query.path as string;
+    const expires = req.query.expires as string;
+    const sig = req.query.sig as string;
+
+    if (!filePath || !expires || !sig) {
+      return res.status(400).json({ error: 'Missing required signed download parameters.' });
+    }
+
+    const localVault = StorageService.getLocalVault();
+    const verification = localVault.verifySignedDownload(bucket, filePath, expires, sig);
+
+    if (!verification.valid || !verification.file) {
+      return res.status(403).json({ error: verification.message });
+    }
+
+    res.setHeader('Content-Type', verification.file.contentType);
+    res.setHeader('Content-Length', verification.file.fileSizeBytes);
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.send(verification.file.data);
+  });
+
 
   // ====================================================
   // 8. VITE DEV / PRODUCTION MIDDLEWARE

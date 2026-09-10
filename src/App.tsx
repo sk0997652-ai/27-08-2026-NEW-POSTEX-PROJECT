@@ -14,6 +14,7 @@ import { BranchManagerPortal } from './client/components/branch-manager/BranchMa
 import { CentralHrPortal } from './client/components/central-hr/CentralHrPortal';
 import { SuperAdminPortal } from './client/components/super-admin/SuperAdminPortal';
 import { ZonalHrPortal } from './client/components/zonal-hr/ZonalHrPortal';
+import { IntegrationsDashboard } from './client/components/integrations/IntegrationsDashboard';
 import { WorkflowPreview } from './client/components/workflow/WorkflowPreview';
 import { ShieldCheck, Loader2 } from 'lucide-react';
 
@@ -107,6 +108,12 @@ export default function App() {
               <SuperAdminPortal
                 userRole={currentUser.role}
                 currentUserName={`${currentUser.firstName} ${currentUser.lastName}`}
+              />
+            )}
+
+            {activeTab === 'integrations' && (
+              <IntegrationsDashboard
+                userRole={currentUser.role}
               />
             )}
 

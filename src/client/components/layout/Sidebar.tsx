@@ -12,7 +12,8 @@ import {
   ShieldCheck,
   Award,
   Smartphone,
-  FileCheck2
+  FileCheck2,
+  Sliders
 } from 'lucide-react';
 import { UserRole } from '../../../types';
 
@@ -21,6 +22,7 @@ export type NavTab =
   | 'zonal_hr'
   | 'central_hr'
   | 'branch_manager'
+  | 'integrations'
   | 'zones'
   | 'branches'
   | 'departments'
@@ -53,6 +55,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: ShieldCheck,
       visible: isSuperAdmin,
       badge: 'Phase 6'
+    },
+    {
+      id: 'integrations' as NavTab,
+      label: 'Production Integrations',
+      icon: Sliders,
+      visible: isSuperAdmin || userRole === 'CENTRAL_HR',
+      badge: 'Phase 7'
     },
     {
       id: 'zonal_hr' as NavTab,

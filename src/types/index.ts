@@ -518,3 +518,54 @@ export interface Phase2SecurityTestResult {
   };
 }
 
+// Phase 7 Production Integrations Types
+export interface IntegrationProviderInfo {
+  id: string;
+  name: string;
+  isConfigured: boolean;
+  isPaid?: boolean;
+  description: string;
+  recommendationNote?: string;
+}
+
+export interface IntegrationCategoryStatus {
+  activeProviderId: string;
+  activeProviderName: string;
+  isConfigured: boolean;
+  availableProviders: IntegrationProviderInfo[];
+  extraConfig?: Record<string, string | number | boolean>;
+}
+
+export interface GlobalIntegrationsState {
+  environment: string;
+  sms: IntegrationCategoryStatus;
+  email: IntegrationCategoryStatus & { fromAddress: string };
+  storage: IntegrationCategoryStatus & {
+    defaultBucket: string;
+    isPrivateEnforced: boolean;
+    defaultSignedUrlTtlSeconds: number;
+  };
+  whatsapp: IntegrationCategoryStatus & {
+    phoneNumberId: string;
+    wabaId: string;
+  };
+  recommendations: {
+    category: string;
+    recommendedProvider: string;
+    rationale: string;
+    requiredCredentials: string[];
+    costProfile: string;
+  }[];
+}
+
+export interface SignedUrlResponse {
+  success: boolean;
+  provider: string;
+  signedUrl: string;
+  expiresInSeconds: number;
+  expiresAt: string;
+  path: string;
+  bucket: string;
+}
+
+
